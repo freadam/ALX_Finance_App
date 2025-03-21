@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User
-from models import Category, Role, Budget, Transaction, Forecast, UserProfile
+from .models import Category, Role, Budget, Transaction, Forecast, UserProfile
 
 
 class CategorySerializer(serializers.Serializer):
