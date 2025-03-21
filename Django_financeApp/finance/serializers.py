@@ -3,10 +3,10 @@ from django.contrib.auth.models import User
 from .models import Category, Role, Budget, Transaction, Forecast, UserProfile
 
 
-class CategorySerializer(serializers.Serializer):
+class CategorySerializer(serializers.ModelSerializer):
     class Meta:
         model = Category
-        fields = ['name','description']
+        fields = '__all__'
         read_only_fields = ('id', 'created_at', 'updated_at')
         
     def validate(self, data):
@@ -14,7 +14,7 @@ class CategorySerializer(serializers.Serializer):
             raise serializers.ValidationError("Name must be at least 3 characters long.")
         return data
 
-class RoleSerializer(serializers.Serializer):
+class RoleSerializer(serializers.ModelSerializer):
     class Meta:
         model = Role
         fields = ['name']
@@ -63,4 +63,3 @@ class UserProfileSerializer(serializers.ModelSerializer):
         model = UserProfile
         fields = '__all__'
         read_only_fields = ('id', 'created_at', 'updated_at')
-        
