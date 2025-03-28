@@ -1,8 +1,14 @@
 from rest_framework import serializers
+from decimal import Decimal
 from django.contrib.auth.models import User
 from .models import Category, Role, Budget, Transaction, Forecast, UserProfile
 
-
+class UserSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ('id', 'username', 'email', 'first_name', 'last_name')
+        read_only_fields = ('id',)
+        
 class CategorySerializer(serializers.ModelSerializer):
     class Meta:
         model = Category
@@ -17,7 +23,7 @@ class CategorySerializer(serializers.ModelSerializer):
 class RoleSerializer(serializers.ModelSerializer):
     class Meta:
         model = Role
-        fields = ['name']
+        fields = '__all__'
         read_only_fields = ('id', 'created_at', 'updated_at')
         
     def validate(self, data):
@@ -25,36 +31,54 @@ class RoleSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Name must be at least 3 characters long.")
         return data
         
+class BudgetCategorySerializer(serializers.ModelSerializer):
+    category = CategorySerializer()
+    class Meta:
+        model = Budget
+        fields = ['id','user', 'category', 'amount', 'start_date','end_date']
+        read_only_fields = ('id', 'created_at', 'updated_at')
+
 class BudgetSerializer(serializers.ModelSerializer):
     class Meta:
         model = Budget
         fields = ['user', 'category', 'amount', 'start_date','end_date']
         read_only_fields = ('id', 'created_at', 'updated_at')
 
-    
-class TransactionSerializer(serializers.Serializer):
+class TransactionSerializer(serializers.ModelSerializer):
     class Meta:
         model = Transaction
-        fields = ['user', 'category', 'amount', 'type','date','client','note','completed']
+        fields = '__all__'
         read_only_fields = ('id', 'created_at', 'updated_at')
         
-    def validate_amount(self, data):
-        if data['amount'] <=0:
-            raise serializers.ValidationError('transaction amount must be greater than 0.')
-        return data
+    def validate_amount(self, value):
+        if not isinstance(value, Decimal):
+            raise serializers.ValidationError("Amount must be a decimal number.")
+        
+        if value <= 0:
+            raise serializers.ValidationError("Amount must be greater than zero.")
+        
+        return value
+   
+class TransactionCategoryUserSerializer(serializers.ModelSerializer):
+    category = CategorySerializer() #nested serializer
+    user = UserSerializer(read_only=True)
+    
+    class Meta:
+        model = Transaction
+        fields = '__all__'
+        read_only_fields = ('id', 'created_at', 'updated_at')
+        
 
+
+    
 class ForecastSerializer(serializers.Serializer):
+    user = UserSerializer(read_only=True)  # nested serializer
     class Meta:
         model = Forecast
-        fields = ['user', 'opening_balance', 'cash_in', 'cash_out','projected_income','projected_expense','closing_balance','forecast_date']
+        fields = ['user', 'opening_balance', 'cash_in', 'cash_out','closing_balance','start_date','end_date']
         read_only_fields = ('id', 'created_at', 'updated_at')
 
-class UserSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = User
-        fields = ('id', 'username', 'email', 'first_name', 'last_name')
-        read_only_fields = ('id',)
-        
+      
 class UserProfileSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
     role = RoleSerializer(read_only=True)

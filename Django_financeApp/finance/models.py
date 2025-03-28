@@ -23,6 +23,7 @@ class Category (models.Model):
 class Role (models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=50,unique=True)
+    description = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
@@ -58,8 +59,8 @@ class Transaction(models.Model):
     amount = models.DecimalField(max_digits=15,decimal_places=2,validators=[MinValueValidator(0)]) # transaction money cannot be 0
     type = models.CharField(max_length=7, choices=TRANSACTION_TYPES)
     date = models.DateField()
-    client = models.CharField(max_length=50,null=True)
-    note = models.TextField(null=True)
+    client = models.CharField(max_length=50,blank=True)
+    note = models.TextField(blank=True)
     completed = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -74,16 +75,15 @@ class Forecast(models.Model):
     user = models.ForeignKey(User,null=True,on_delete=models.SET_NULL)  # evenif the user is deleted the forecast is not deleted
     opening_balance = models.DecimalField(max_digits=15,decimal_places=2, default=0.0) # under certain cases the  balance can be 0
     cash_in = models.DecimalField(max_digits=15,decimal_places=2, default=0.0) # under certain cases the  balance can be 0
-    projected_income = models.DecimalField(max_digits=15,decimal_places=2, default=0.0) # under certain cases the  balance can be 0
     cash_out =models.DecimalField(max_digits=15,decimal_places=2, default=0.0) # under certain cases the  balance can be 0
-    projected_expense = models.DecimalField(max_digits=15,decimal_places=2, default=0.0) # under certain cases the  balance can be 0
     closing_balance = models.DecimalField(max_digits=15,decimal_places=2, default=0.0)
-    forecast_date = models.DateField()
+    start_date = models.DateField()
+    end_date = models.DateField()
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return f'forecast for {self.forecast_date} - {self.projected_income} to {self.projected_expense}'
+        return f'forecast for {self.start_date} to {self.end_date} - {self.opening_balance} to {self.closing_balance}'
 
 # model UserProfile
 class UserProfile(models.Model):
