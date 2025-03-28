@@ -129,117 +129,70 @@ class ForecastViewSet(viewsets.ModelViewSet):
     ordering_fields = ['start_date', 'opening_balance','closing_balance']    # Fields to order by
     ordering = ['start_date']
     permission_classes = [IsAuthenticatedOrReadOnly]
-
-    def get_queryset(self):
-        return Forecast.objects.filter(user=self.request.user)
-
-    # def perform_create(self, serializer):
-    #     # Calculate closing balance based on opening balance and cash flows
-    #     opening_balance = serializer.validated_data.get('opening_balance', 0)
-    #     cash_in = serializer.validated_data.get('cash_in', 0)
-    #     cash_out = serializer.validated_data.get('cash_out', 0)
-    #     closing_balance = opening_balance + cash_in - cash_out 
-    #     serializer.save(user=self.request.user, closing_balance=closing_balance)
-
-    @action(detail=False, methods=['get'])
-    def current_position(self, request):
-        latest_forecast = self.get_queryset().order_by('start_date').first()
-        if not latest_forecast:
-            return Response({'error': 'No forecast data available'}, status=404)
-            
-        return Response({
-            'opening_balance': latest_forecast.opening_balance,
-            'cash_in': latest_forecast.cash_in,
-            'cash_out': latest_forecast.cash_out,
-            'closing_balance': latest_forecast.closing_balance,
-            'net_cash_flow': latest_forecast.cash_in - latest_forecast.cash_out,
-            'start_date': latest_forecast.start_date,
-            'end_date': latest_forecast.end_date,
-        })
     
     # returns 13weeks projection based past data
     @action(detail=False, methods=['get'])
     def summary13week(self, request):
-        from django.db import transaction
-        
         current_date = timezone.now().date()
         user = request.user
 
-        with transaction.atomic():
-            # Clear existing forecasts first
-            Forecast.objects.filter(user=user).delete()
+        # Calculate initial closing balance from completed transactions
+        income_expense = Transaction.objects.filter(
+            user=user,
+            date__lte=current_date,
+            completed=True
+        ).aggregate(
+            income=Coalesce(Sum('amount', filter=Q(type='income')), Value(0, output_field=models.DecimalField())),
+            expense=Coalesce(Sum('amount', filter=Q(type='expense')), Value(0, output_field=models.DecimalField()))
+        )
+        initial_closing = income_expense['income'] - income_expense['expense']
 
-            # Calculate initial closing balance from completed transactions
-            income_expense = Transaction.objects.filter(
+        # Calculate weekly average expense
+        thirty_days_ago = current_date - timedelta(days=30)
+        avg_monthly_expense = Transaction.objects.filter(
+            user=user,
+            date__gte=thirty_days_ago,
+            type='expense',
+            completed=True
+        ).aggregate(total=Coalesce(Sum('amount'), Value(0, output_field=models.DecimalField())))['total']
+        weekly_avg_expense = (avg_monthly_expense / 30) * 7 if avg_monthly_expense else 0
+
+        
+        projection = []
+        current_closing_balance = initial_closing
+
+        for week_num in range(13):
+            week_start = current_date + timedelta(weeks=week_num)
+            week_end = week_start + timedelta(days=6)
+
+            # Get pending transactions
+            aggregates = Transaction.objects.filter(
                 user=user,
-                date__lte=current_date,
-                completed=True
+                date__range=[week_start, week_end],
+                completed=False
             ).aggregate(
-                income=Coalesce(Sum('amount', filter=Q(type='income')), Value(0, output_field=models.DecimalField())),
-                expense=Coalesce(Sum('amount', filter=Q(type='expense')), Value(0, output_field=models.DecimalField()))
+                cash_in=Coalesce(Sum('amount', filter=Q(type='income')), Value(0, output_field=models.DecimalField())),
+                cash_out_pending=Coalesce(Sum('amount', filter=Q(type='expense')), Value(0, output_field=models.DecimalField()))
             )
-            initial_closing = income_expense['income'] - income_expense['expense']
 
-            # Calculate weekly average expense
-            thirty_days_ago = current_date - timedelta(days=30)
-            avg_monthly_expense = Transaction.objects.filter(
-                user=user,
-                date__gte=thirty_days_ago,
-                type='expense',
-                completed=True
-            ).aggregate(total=Coalesce(Sum('amount'), Value(0, output_field=models.DecimalField())))['total']
-            weekly_avg_expense = (avg_monthly_expense / 30) * 7 if avg_monthly_expense else 0
+            cash_in = aggregates['cash_in']
+            cash_out = aggregates['cash_out_pending'] + weekly_avg_expense
+            net_cash = cash_in - cash_out
+            opening = current_closing_balance
+            closing = opening + net_cash
 
-            # Prepare data for bulk creation
-            forecasts_to_create = []
-            projection = []
-            current_closing_balance = initial_closing
+            projection.append({
+                'week': week_num + 1,
+                'opening_balance': float(opening),
+                'cash_in': float(cash_in),
+                'cash_out': float(cash_out),
+                'closing_balance': float(closing),
+                'week_start': week_start,
+                'week_end': week_end,
+            })
 
-            for week_num in range(13):
-                week_start = current_date + timedelta(weeks=week_num)
-                week_end = week_start + timedelta(days=6)
+            current_closing_balance = closing
 
-                # Get pending transactions
-                aggregates = Transaction.objects.filter(
-                    user=user,
-                    date__range=[week_start, week_end],
-                    completed=False
-                ).aggregate(
-                    cash_in=Coalesce(Sum('amount', filter=Q(type='income')), Value(0, output_field=models.DecimalField())),
-                    cash_out_pending=Coalesce(Sum('amount', filter=Q(type='expense')), Value(0, output_field=models.DecimalField()))
-                )
-
-                cash_in = aggregates['cash_in']
-                cash_out = aggregates['cash_out_pending'] + weekly_avg_expense
-                net_cash = cash_in - cash_out
-                opening = current_closing_balance
-                closing = opening + net_cash
-
-                # Prepare forecast object
-                forecast = Forecast(
-                    user=user,
-                    forecast_date=week_start,
-                    opening_balance=opening,
-                    cash_in=cash_in,
-                    cash_out=cash_out,
-                    closing_balance=closing
-                )
-                forecasts_to_create.append(forecast)
-
-                projection.append({
-                    'week': week_num + 1,
-                    'opening_balance': float(opening),
-                    'cash_in': float(cash_in),
-                    'cash_out': float(cash_out),
-                    'closing_balance': float(closing),
-                    'week_start': week_start,
-                    'week_end': week_end,
-                })
-
-                current_closing_balance = closing
-
-            # Bulk create all forecasts in a single query
-            Forecast.objects.bulk_create(forecasts_to_create)
 
         return Response(projection)
 # User Profile   
