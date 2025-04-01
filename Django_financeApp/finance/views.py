@@ -3,6 +3,8 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.utils import timezone
 from datetime import timedelta
+from datetime import date
+from django.utils.timezone import now
 from django.db import models
 from django.db.models import Q, Sum, Value
 from django.db.models.functions import Coalesce
@@ -49,30 +51,38 @@ class BudgetViewSet(viewsets.ModelViewSet):
         serializer.save(user=self.request.user)
         
     # returns percentage of budget used from amount planned
-    @action(detail=True, methods=['get'])
-    def progress(self, request, pk=None):
-        budget = self.get_object()
-        actual_expenses = Transaction.objects.filter(
-            user=request.user,
-            category=budget.category,
-            type='expense',
-            date__range=[budget.start_date, budget.end_date]
-        ).aggregate(total=Sum('amount'))
+    @action(detail=False, methods=['get'])
+    def progress(self, request):
+        today = date.today()
+        start_of_month = today.replace(day=1)
+        start_of_nextMonth = (start_of_month.replace(day=28) + timedelta(days=4)).replace(day=1)  # First day of next month
 
-        total_spent = actual_expenses['total'] or 0
-        return Response({
-            'budget_amount': budget.amount,
-            'amount_spent': total_spent,
-            'amount_remaining': budget.amount - total_spent,
-            'percentage_used': (total_spent / budget.amount) * 100 if budget.amount > 0 else 0
-        })                        
+        budgets = Budget.objects.filter(start_date__gte=start_of_month, start_date__lt=start_of_nextMonth)
+        completed_transactions = Transaction.objects.filter(completed=True, type='expense')
+
+        budget_progress = []
+
+        for budget in budgets:
+            actual_expenses = completed_transactions.filter(category=budget.category).aggregate(total=Sum('amount'))
+            total_spent = actual_expenses['total'] or 0
+
+            budget_progress.append({
+                'budget_id': budget.id,
+                'category': budget.category.name,
+                'budget_amount': budget.amount,
+                'amount_spent': total_spent,
+                'amount_remaining': budget.amount - total_spent,
+                'percentage_used': (total_spent / budget.amount) * 100 if budget.amount > 0 else 0
+            })
+
+        return Response(budget_progress)               
 
 # Transaction viewset
 class TransactionsViewSet(viewsets.ModelViewSet):
     queryset = Transaction.objects.all()
     serializer_class = TransactionSerializer
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]        #filters
-    search_fields = ['category__name', 'note', 'client']           # search transactions by category, by note and name
+    search_fields = ['description','category__name', 'note', 'client']           # search transactions by category, by note and name
     ordering_fields = ['date', 'amount', 'type', 'completed']      # order transactions by date, amount,type(income,expense),complete status
     filterset_fields = ['type', 'completed', 'category__name']     # filter transactions by type(income,expense),complete status,category
     permission_classes = [IsAuthenticatedOrReadOnly]                        
@@ -92,7 +102,7 @@ class TransactionsViewSet(viewsets.ModelViewSet):
         today = timezone.now().date()
         last_month = today - timedelta(days=30)
         
-        transactions = self.get_queryset().filter(date__gte=last_month)
+        transactions = Transaction.objects.all()
         completed_transactions = transactions.filter(completed=True)
         pending_transactions = transactions.filter(completed=False)
         

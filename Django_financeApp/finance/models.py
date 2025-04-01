@@ -54,6 +54,7 @@ class Transaction(models.Model):
     ]
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    description = models.CharField(max_length=255)
     user = models.ForeignKey(User,null=True,on_delete=models.SET_NULL) # evenif the user is deleted the transaction is not deleted
     category = models.ForeignKey(Category,on_delete=models.PROTECT) #can delete categories without deleting transactions
     amount = models.DecimalField(max_digits=15,decimal_places=2,validators=[MinValueValidator(0)]) # transaction money cannot be 0
